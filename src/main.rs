@@ -66,11 +66,12 @@ impl From<NmcliError> for Error {
     }
 }
 
-//// `nmcli` command errors.
+//// NetworkManager's `nmcli` command errors.
 #[derive(Debug)]
 enum NmcliError {
     SecretsNotProvided,
     NetworkNotFound,
+    NotAuthorized,
     Other(String),
 }
 
@@ -79,6 +80,7 @@ impl Display for NmcliError {
         match self {
             NmcliError::SecretsNotProvided => write!(f, "password not matching or not provided"),
             NmcliError::NetworkNotFound => write!(f, "WiFi network not found"),
+            NmcliError::NotAuthorized => write!(f, "not authorized to control networking"),
             NmcliError::Other(error) => write!(f, "{error}"),
         }
     }
@@ -94,6 +96,9 @@ impl From<&str> for NmcliError {
             }
             "Error: Connection activation failed: The Wi-Fi network could not be found." => {
                 NmcliError::NetworkNotFound
+            }
+            "Error: Failed to add/activate new connection: Not authorized to control networking" => {
+                NmcliError::NotAuthorized
             }
             s => NmcliError::Other(s.to_string()),
         }
