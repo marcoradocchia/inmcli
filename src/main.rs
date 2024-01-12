@@ -1,13 +1,15 @@
+use std::ffi::OsStr;
+use std::fmt::Display;
+use std::process::{Command, ExitCode, Output, Stdio};
+use std::str::FromStr;
+
 use clap::Parser;
 use colored::Colorize;
-use dialoguer::{theme::ColorfulTheme, Confirm, FuzzySelect, Password, Select};
-use spinoff::{spinner, spinners, Color, Spinner, Streams};
-use std::{
-    ffi::OsStr,
-    fmt::Display,
-    process::{Command, ExitCode, Output, Stdio},
-    str::FromStr,
-};
+use dialoguer::theme::ColorfulTheme;
+use dialoguer::{Confirm, FuzzySelect, Password, Select};
+use spinoff::spinner;
+use spinoff::spinners;
+use spinoff::{Color, Spinner, Streams};
 
 /// CLI options.
 #[derive(Debug, Clone, Parser)]
@@ -38,7 +40,7 @@ enum Error {
     Bssid(String),
     Signal,
     WiFiStatus,
-    Terminal(std::io::Error),
+    Terminal(dialoguer::Error),
 }
 
 impl Display for Error {
@@ -468,7 +470,7 @@ impl Nmcli {
     /// Spawn `nmcli` command with required options.
     fn scan(&mut self) -> Result<()> {
         let spinner = Spinner::new_with_stream(
-            spinner!(["󰤟 ", "󰤢 ", "󰤥 ", "󰤨 ", "󰤥 ", "󰤢 ", "󰤟 "], 100),
+            spinner!(["󰤟 ", "󰤢 ", "󰤥 ", "󰤨 ", "󰤥 ", "󰤢 ", "󰤟 "], 200),
             "Scanning WiFi networks...",
             Color::Cyan,
             Streams::Stderr,
