@@ -38,7 +38,7 @@ enum Error {
     Bssid(String),
     Signal,
     WiFiStatus,
-    Terminal(std::io::Error),
+    Terminal(dialoguer::Error),
 }
 
 impl Display for Error {
@@ -66,7 +66,7 @@ impl From<NmcliError> for Error {
     }
 }
 
-//// NetworkManager's `nmcli` command errors.
+/// `NetworkManager`'s `nmcli` command errors.
 #[derive(Debug)]
 enum NmcliError {
     SecretsNotProvided,
@@ -129,16 +129,16 @@ impl FromStr for Frequency {
 }
 
 impl Frequency {
-    /// Return [`Frequency`] as `f32` **GHz** value.
-    fn ghz(&self) -> f32 {
+    /// Return [`Frequency`] as `f32` value representing **`GHz`**.
+    fn ghz(self) -> f32 {
         match self {
-            Self::MHz(val) => *val as f32 / 1e3,
-            Self::GHz(val) => *val,
+            Self::MHz(val) => f32::from(val) / 1e3,
+            Self::GHz(val) => val,
         }
     }
 }
 
-/// WiFi security.
+/// `WiFi` security.
 #[derive(Debug, Clone)]
 #[allow(clippy::upper_case_acronyms)]
 enum WiFiSecurity {
@@ -215,11 +215,11 @@ struct WirelessAccessPoint {
     ssid: String,
     /// Network BSSID (MAC address of the WAP), 48bits, 6 bytes.
     bssid: Bssid,
-    /// WiFi frequency (MHz).
+    /// `WiFi` frequency.
     freq: Frequency,
-    /// WiFi signal strenght as percentage.
+    /// `WiFi` signal strenght as percentage.
     signal: u8,
-    /// WiFi Security.
+    /// `WiFi` Security.
     security: Option<Vec<WiFiSecurity>>,
 }
 
@@ -272,7 +272,7 @@ impl WirelessAccessPoint {
         }
 
         if options.frequency {
-            wpa_string.push(format!("󰖩 {:.1} GHz", self.freq.ghz()))
+            wpa_string.push(format!("󰖩 {:.1} GHz", self.freq.ghz()));
         }
 
         if options.signal {
@@ -285,23 +285,23 @@ impl WirelessAccessPoint {
                     " {}",
                     security
                         .iter()
-                        .map(|sec| sec.to_string())
+                        .map(ToString::to_string)
                         .collect::<Vec<String>>()
                         .join(", "),
                 ),
                 None => " ".to_string(),
-            })
+            });
         }
 
         wpa_string.join(" ")
     }
 }
 
-/// WiFi Status.
+/// `WiFi` Status.
 #[derive(PartialEq, Eq, Debug, Clone, Copy)]
 enum WiFiStatus {
-    Enabled,
     Disabled,
+    Enabled,
 }
 
 impl FromStr for WiFiStatus {
@@ -309,8 +309,8 @@ impl FromStr for WiFiStatus {
 
     fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
         match s {
-            "enabled" => Ok(Self::Enabled),
             "disabled" => Ok(Self::Disabled),
+            "enabled" => Ok(Self::Enabled),
             _ => Err(Error::WiFiStatus),
         }
     }
@@ -318,7 +318,7 @@ impl FromStr for WiFiStatus {
 
 impl WiFiStatus {
     /// Return the *negation* (the opposite) of [`WiFiStatus`].
-    fn negate(&self) -> WiFiStatus {
+    fn negate(self) -> WiFiStatus {
         match self {
             Self::Enabled => Self::Disabled,
             Self::Disabled => Self::Enabled,
@@ -346,12 +346,12 @@ impl WiFiStatus {
     }
 }
 
-/// NetworkManager `nmcli` command.
+/// `NetworkManager` (`nmcli`) command.
 #[derive(Debug)]
 struct Nmcli {
     /// Command options.
     options: Options,
-    /// WiFi status as [`WiFiStatus`].
+    /// `WiFi` status as [`WiFiStatus`].
     status: WiFiStatus,
     /// Known Wireless Access Points SSIDs.
     known: Vec<String>,
@@ -453,12 +453,12 @@ impl Nmcli {
         )
     }
 
-    /// Return WiFis status.
+    /// Return `WiFi`s status.
     fn wifi_status() -> Result<WiFiStatus> {
         WiFiStatus::from_str(&Self::execute_with_output(&["wifi", "radio"])?)
     }
 
-    /// Toggle WiFi status.
+    /// Toggle `WiFi` status.
     fn toggle_wifi(&self) -> Result<()> {
         Self::execute(&["radio", "wifi", &self.status.negate().to_arg()])?;
 
@@ -513,8 +513,8 @@ impl Nmcli {
             .map(|idx| &self.waps[idx]))
     }
 
-    /// Execute `nmcli device wifi connect <bssid> [password <password>] with spinner.
-    fn _connect<S>(&self, args: &[S]) -> NmcliResult<()>
+    /// Execute `nmcli device wifi connect <bssid> [password <password>]` command with spinner.
+    fn _connect<S>(args: &[S]) -> NmcliResult<()>
     where
         S: AsRef<OsStr>,
     {
@@ -525,18 +525,20 @@ impl Nmcli {
             Streams::Stderr,
         );
 
-        let result = Self::execute(args);
-
-        match &result {
-            Ok(_) => spinner.stop_and_persist("✔", Some(Color::Green), "Connected!"),
-            Err(NmcliError::SecretsNotProvided) => {
-                spinner.stop_and_persist("", Some(Color::Red), "Wrong password")
+        match Self::execute(args) {
+            Ok(_) => {
+                spinner.stop_and_persist("✔", Some(Color::Green), "Connected!");
+                return Ok(());
             }
-            Err(_) => spinner.stop(),
+            Err(error @ NmcliError::SecretsNotProvided) => {
+                spinner.stop_and_persist("", Some(Color::Red), "Wrong password");
+                return Err(error);
+            }
+            Err(error) => {
+                spinner.stop();
+                return Err(error);
+            }
         }
-
-        result?;
-        Ok(())
     }
 
     /// Connect to given [`WirelessAccessPoint`].
@@ -544,9 +546,8 @@ impl Nmcli {
         // Scan WAPs before trying to connect.
         self.scan()?;
 
-        let wap = match self.select()? {
-            Some(wap) => wap,
-            None => return Ok(()),
+        let Some(wap) = self.select()? else {
+            return Ok(());
         };
 
         // If the device is already connected, return.
@@ -557,7 +558,7 @@ impl Nmcli {
         // Arguments to `nmcli` required in oreder to connect a network.
         let mut args: Vec<String> = ["device", "wifi", "connect"]
             .iter()
-            .map(|arg| arg.to_string())
+            .map(ToString::to_string)
             .collect();
         args.push(wap.bssid.to_string());
 
@@ -575,8 +576,8 @@ impl Nmcli {
                         .map_err(Error::Terminal)?,
                 );
 
-                match self._connect(&args) {
-                    Ok(_) => return Ok(()),
+                match Self::_connect(&args) {
+                    Ok(()) => return Ok(()),
                     Err(NmcliError::SecretsNotProvided) => {
                         // Pop wrong password from the `args` vector.
                         args.pop();
@@ -588,7 +589,7 @@ impl Nmcli {
             }
         }
 
-        Ok(self._connect(&args)?)
+        Ok(Self::_connect(&args)?)
     }
 
     /// Delete known WAP.
@@ -620,7 +621,7 @@ impl Nmcli {
 
     /// Interactive menu.
     fn menu(&self) -> Result<Option<NmcliCommand>> {
-        let commands = NmcliCommand::menu_list(&self.status)?;
+        let commands = NmcliCommand::menu_list(self.status)?;
         Select::with_theme(&ColorfulTheme::default())
             .items(&commands)
             .default(0)
@@ -634,9 +635,9 @@ impl Nmcli {
 /// `nmcli` commands.
 #[derive(Debug, Clone, Copy)]
 enum NmcliCommand {
-    /// Toggle WiFi (`nmcli device wifi radio <on/off>`).
+    /// Toggle `WiFi` (`nmcli device wifi radio <on/off>`).
     ToggleWiFi,
-    /// Connect to WiFi network.
+    /// Connect to `WiFi` network.
     Connect,
     /// Delete known WAP from known WAPs list.
     Delete,
@@ -647,8 +648,7 @@ impl FromStr for NmcliCommand {
 
     fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
         match s {
-            "Enable WiFi" => Ok(Self::ToggleWiFi),
-            "Disable WiFi" => Ok(Self::ToggleWiFi),
+            "Enable WiFi" | "Disable WiFi" => Ok(Self::ToggleWiFi),
             "Connect to WiFi network" => Ok(Self::Connect),
             "Delete WiFi network" => Ok(Self::Delete),
             command => Err(Error::NmcliCommand(command.to_string())),
@@ -668,15 +668,22 @@ impl NmcliCommand {
 }
 
 impl NmcliCommand {
-    /// Return a menu list based on [`WiFiStatus`].
-    fn menu_list(wifi_status: &WiFiStatus) -> Result<Vec<String>> {
-        let mut menu = vec![Self::ToggleWiFi, Self::Delete];
-        if *wifi_status == WiFiStatus::Enabled {
-            menu.insert(1, Self::Connect);
+    /// Return an menu iterator over [`NmcliCommand`]s.
+    #[inline]
+    fn menu_commands(wifi_status: WiFiStatus) -> impl Iterator<Item = NmcliCommand> {
+        match wifi_status {
+            WiFiStatus::Disabled => [Self::ToggleWiFi, Self::Delete].as_slice(),
+            WiFiStatus::Enabled => [Self::ToggleWiFi, Self::Connect, Self::Delete].as_slice(),
         }
+        .iter()
+        .copied()
+    }
 
-        menu.into_iter()
-            .map(|command| command.to_cmd_string())
+    /// Return a menu list based on [`WiFiStatus`].
+    #[inline]
+    fn menu_list(wifi_status: WiFiStatus) -> Result<Vec<String>> {
+        Self::menu_commands(wifi_status)
+            .map(NmcliCommand::to_cmd_string)
             .collect()
     }
 }
